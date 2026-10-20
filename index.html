@@ -110,18 +110,38 @@
 
       loadingBar.style.display = "block";
 
+      // Task.Delay on this WebGL build schedules a thread-pool timer that never
+      // runs, so the hub and the duel both wait forever. The patched player
+      // publishes each promise; a browser timer completes it.
+      var unityInstance = null;
+      var seenDelays = {};
+      function pumpDelays() {
+        if (!unityInstance || !unityInstance.Module || !unityInstance.Module.asm) return;
+        var asm = unityInstance.Module.asm;
+        if (!asm.g_delay_task) return;
+        var task = asm.g_delay_task.value | 0;
+        if (!task || seenDelays[task]) return;
+        seenDelays[task] = true;
+        var ms = asm.g_delay_ms.value | 0;
+        if (ms < 0) ms = 0;
+        setTimeout(function() {
+          try { asm.dynCall_vii(43698, task, 0); }
+          catch (err) { console.error(err); }
+        }, ms);
+      }
+      setInterval(pumpDelays, 50);
+
       var script = document.createElement("script");
       script.src = loaderUrl;
       script.onload = () => {
         createUnityInstance(canvas, config, (progress) => {
           progressBarFull.style.width = 100 * progress + "%";
-              }).then((unityInstance) => {
+              }).then((instance) => {
+                unityInstance = instance;
                 loadingBar.style.display = "none";
                 fitCanvas();
-                // The build closes every panel during startup and never enables
-                // the hub backdrop, so the frame after the Unity splash is black.
-                // SetHubState turns the castle back on. Call it again after Start
-                // has finished, or the startup pass hides the image once more.
+                // Startup disables both backdrop images. SetHubState turns the
+                // castle back on, including after the game's own init pass.
                 function showHubBackdrop() {
                   unityInstance.SendMessage("BackGroundPanel", "SetHubState");
                 }
