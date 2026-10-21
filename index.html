@@ -59,9 +59,9 @@
       var buildUrl = "Build";
       var loaderUrl = buildUrl + "/9853637125e801e9aae48e78dbbdcfca.loader.js";
       var config = {
-        dataUrl: buildUrl + "/1eff8389215e552fdd9d36584fea1664.data.unityweb",
+        dataUrl: buildUrl + "/1eff8389215e552fdd9d36584fea1664.data.unityweb?v=3",
         frameworkUrl: buildUrl + "/69eb837354ab37da0c7f2a414cfc68b6.framework.js.unityweb",
-        codeUrl: buildUrl + "/ac367a1d2e10fbb4f7d485aab74dad86.wasm.unityweb",
+        codeUrl: buildUrl + "/ac367a1d2e10fbb4f7d485aab74dad86.wasm.unityweb?v=3",
         streamingAssetsUrl: "StreamingAssets",
         companyName: "BlindCoding",
         productName: "MathGame",
@@ -112,24 +112,32 @@
 
       // Task.Delay on this WebGL build schedules a thread-pool timer that never
       // runs, so the hub and the duel both wait forever. The patched player
-      // publishes each promise; a browser timer completes it.
+      // publishes every promise; a browser timer completes it.
       var unityInstance = null;
-      var seenDelays = {};
+      var delayCursor = 0;
       function pumpDelays() {
         if (!unityInstance || !unityInstance.Module || !unityInstance.Module.asm) return;
         var asm = unityInstance.Module.asm;
-        if (!asm.g_delay_task) return;
-        var task = asm.g_delay_task.value | 0;
-        if (!task || seenDelays[task]) return;
-        seenDelays[task] = true;
-        var ms = asm.g_delay_ms.value | 0;
-        if (ms < 0) ms = 0;
-        setTimeout(function() {
-          try { asm.dynCall_vii(43698, task, 0); }
-          catch (err) { console.error(err); }
-        }, ms);
+        if (!asm.g_delay_seq) return;
+        var seq = asm.g_delay_seq.value | 0;
+        var guard = 0;
+        while ((delayCursor | 0) !== (seq | 0) && guard < 8) {
+          var slot = delayCursor & 3;
+          var task = asm["g_slot_ptr_" + slot].value | 0;
+          var ms = asm["g_slot_ms_" + slot].value | 0;
+          delayCursor = (delayCursor + 1) | 0;
+          guard++;
+          if (!task) continue;
+          if (ms < 0) ms = 0;
+          (function(task, ms) {
+            setTimeout(function() {
+              try { asm.dynCall_vii(43698, task, 0); }
+              catch (err) { console.error(err); }
+            }, ms);
+          })(task, ms);
+        }
       }
-      setInterval(pumpDelays, 50);
+      setInterval(pumpDelays, 30);
 
       var script = document.createElement("script");
       script.src = loaderUrl;
@@ -140,14 +148,21 @@
                 unityInstance = instance;
                 loadingBar.style.display = "none";
                 fitCanvas();
-                // Startup disables both backdrop images. SetHubState turns the
-                // castle back on, including after the game's own init pass.
+                // Startup disables both backdrop images, then closes the hub.
+                // Start Duele stays on the backdrop, so it remains visible.
+                // Later SetHubState calls restore the castle after that pass.
+                // A click cancels them so they cannot cover the duel.
                 function showHubBackdrop() {
                   unityInstance.SendMessage("BackGroundPanel", "SetHubState");
                 }
+                var hubTimers = [];
                 showHubBackdrop();
-                setTimeout(showHubBackdrop, 1500);
-                setTimeout(showHubBackdrop, 3200);
+                [1200, 2500, 4000].forEach(function(ms) {
+                  hubTimers.push(setTimeout(showHubBackdrop, ms));
+                });
+                canvas.addEventListener("pointerdown", function() {
+                  hubTimers.forEach(clearTimeout);
+                }, { once: true });
                 fullscreenButton.onclick = () => {
                   if (document.fullscreenElement) document.exitFullscreen();
                   else container.requestFullscreen();
